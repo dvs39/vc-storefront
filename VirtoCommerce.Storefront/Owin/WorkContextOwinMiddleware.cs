@@ -33,7 +33,7 @@ using VirtoCommerce.Storefront.Model.Services;
 using VirtoCommerce.Storefront.Model.StaticContent;
 using VirtoCommerce.Storefront.Model.StaticContent.Services;
 using VirtoCommerce.Storefront.Model.Stores;
-using pricingModel = VirtoCommerce.Storefront.AutoRestClients.PricingModuleApi.Models;
+using VirtoCommerce.Storefront.Services;
 
 namespace VirtoCommerce.Storefront.Owin
 {
@@ -46,8 +46,8 @@ namespace VirtoCommerce.Storefront.Owin
         protected static readonly PathString[] OwinIgnorePathsStrings = GetOwinIgnorePathStrings();
         protected static readonly Country[] AllCountries = GetAllCounries();
 
-        protected readonly UnityContainer Container;
-        protected readonly ILocalCacheManager CacheManager;
+        protected UnityContainer Container { get; }
+        protected ILocalCacheManager CacheManager { get; }
 
         public WorkContextOwinMiddleware(OwinMiddleware next, UnityContainer container)
             : base(next)
@@ -68,6 +68,7 @@ namespace VirtoCommerce.Storefront.Owin
             {
                 if (IsStorefrontRequest(context.Request) && !IsBundleRequest(context.Request))
                 {
+                    await ClearCacheIfHasChanges();
                     await HandleStorefrontRequest(context);
                 }
 
@@ -99,6 +100,16 @@ namespace VirtoCommerce.Storefront.Owin
             return BundleTable.Bundles.Any(b => b.Path.Equals(path, StringComparison.OrdinalIgnoreCase));
         }
 
+        protected virtual bool IsStaticAssetRequest(IOwinRequest request)
+        {
+            var result = string.Equals(request.Method, "GET", StringComparison.OrdinalIgnoreCase);
+            if (result)
+            {
+                result = request.Uri.AbsolutePath.Contains("/assets/static/");
+            }
+            return result;
+        }
+
         protected virtual bool IsAssetRequest(IOwinRequest request)
         {
             var retVal = string.Equals(request.Method, "GET", StringComparison.OrdinalIgnoreCase);
@@ -107,6 +118,16 @@ namespace VirtoCommerce.Storefront.Owin
                 retVal = request.Uri.IsFile || request.Uri.AbsolutePath.Contains("/assets/");
             }
             return retVal;
+        }
+
+        protected virtual async Task ClearCacheIfHasChanges()
+        {
+            var changesTrackingService = Container.Resolve<IChangesTrackingService>();
+
+            if (await changesTrackingService.HasChanges())
+            {
+                CacheManager.Clear();
+            }
         }
 
         protected virtual async Task HandleStorefrontRequest(IOwinContext context)
@@ -126,142 +147,142 @@ namespace VirtoCommerce.Storefront.Owin
                 workContext.CurrentStore = GetStore(context, workContext.AllStores);
                 workContext.CurrentLanguage = GetLanguage(context, workContext.AllStores, workContext.CurrentStore);
 
-                var commerceApi = Container.Resolve<ICoreModuleApiClient>();
-                workContext.AllCurrencies = await CacheManager.GetAsync("GetAllCurrencies-" + workContext.CurrentLanguage.CultureName, "ApiRegion", async () => { return (await commerceApi.Commerce.GetAllCurrenciesAsync()).Select(x => x.ToWebModel(workContext.CurrentLanguage)).ToArray(); });
-
-                //Sync store currencies with avail in system
-                foreach (var store in workContext.AllStores)
+                if (!IsStaticAssetRequest(context.Request))
                 {
-                    store.SyncCurrencies(workContext.AllCurrencies, workContext.CurrentLanguage);
-                    store.CurrentSeoInfo = store.SeoInfos.FirstOrDefault(x => x.Language == workContext.CurrentLanguage);
-                }
+                    var commerceApi = Container.Resolve<ICoreModuleApiClient>();
+                    workContext.AllCurrencies = await CacheManager.GetAsync("GetAllCurrencies-" + workContext.CurrentLanguage.CultureName, "ApiRegion", async () => { return (await commerceApi.Commerce.GetAllCurrenciesAsync()).Select(x => x.ToCurrency(workContext.CurrentLanguage)).ToArray(); });
 
-                //Set current currency
-                workContext.CurrentCurrency = GetCurrency(context, workContext.CurrentStore);
-
-                //Initialize catalog search criteria
-                workContext.CurrentProductSearchCriteria = new ProductSearchCriteria(workContext.CurrentLanguage, workContext.CurrentCurrency, qs)
-                {
-                    //CatalogId = workContext.CurrentStore.Catalog
-                };
-
-                //Initialize product response group
-                workContext.CurrentProductResponseGroup = EnumUtility.SafeParse(qs.Get("resp_group"), ItemResponseGroup.ItemLarge);
-
-                workContext.PageNumber = qs.Get("page").ToNullableInt();
-                workContext.PageSize = qs.Get("count").ToNullableInt() ?? qs.Get("page_size").ToNullableInt();
-
-                var catalogSearchService = Container.Resolve<ICatalogSearchService>();
-
-                //This line make delay categories loading initialization (categories can be evaluated on view rendering time)
-                workContext.Categories = new MutablePagedList<Category>((pageNumber, pageSize, sortInfos) =>
-                {
-                    var criteria = new CategorySearchCriteria(workContext.CurrentLanguage)
+                    //Sync store currencies with avail in system
+                    foreach (var store in workContext.AllStores)
                     {
-                        PageNumber = pageNumber,
-                        PageSize = pageSize
-                    };
-
-                    if (string.IsNullOrEmpty(criteria.SortBy) && !sortInfos.IsNullOrEmpty())
-                    {
-                        criteria.SortBy = SortInfo.ToString(sortInfos);
+                        store.SyncCurrencies(workContext.AllCurrencies, workContext.CurrentLanguage);
+                        store.CurrentSeoInfo = store.SeoInfos.FirstOrDefault(x => x.Language == workContext.CurrentLanguage);
                     }
-                    var result = catalogSearchService.SearchCategories(criteria);
-                    foreach (var category in result)
+
+                    //Set current currency
+                    workContext.CurrentCurrency = GetCurrency(context, workContext.CurrentStore);
+
+                    //Initialize catalog search criteria
+                    workContext.CurrentProductSearchCriteria = new ProductSearchCriteria(workContext.CurrentLanguage, workContext.CurrentCurrency, qs);
+
+                    //Initialize product response group. Exclude properties meta-information for performance reason (property values will be returned)
+                    workContext.CurrentProductResponseGroup = EnumUtility.SafeParse(qs.Get("resp_group"), ItemResponseGroup.ItemLarge & ~ItemResponseGroup.ItemProperties);
+
+                    workContext.PageNumber = qs.Get("page").ToNullableInt();
+                    workContext.PageSize = qs.Get("count").ToNullableInt() ?? qs.Get("page_size").ToNullableInt();
+
+                    var catalogSearchService = Container.Resolve<ICatalogSearchService>();
+
+                    //This line make delay categories loading initialization (categories can be evaluated on view rendering time)
+                    workContext.Categories = new MutablePagedList<Category>((pageNumber, pageSize, sortInfos) =>
                     {
-                        category.Products = new MutablePagedList<Product>((pageNumber2, pageSize2, sortInfos2) =>
+                        var criteria = new CategorySearchCriteria(workContext.CurrentLanguage)
                         {
-                            var categoryProductCriteria = new ProductSearchCriteria(workContext.CurrentLanguage, workContext.CurrentCurrency)
+                            PageNumber = pageNumber,
+                            PageSize = pageSize,
+                            ResponseGroup = CategoryResponseGroup.Small
+                        };
+
+                        if (string.IsNullOrEmpty(criteria.SortBy) && !sortInfos.IsNullOrEmpty())
+                        {
+                            criteria.SortBy = SortInfo.ToString(sortInfos);
+                        }
+                        var result = catalogSearchService.SearchCategories(criteria);
+                        foreach (var category in result)
+                        {
+                            category.Products = new MutablePagedList<Product>((pageNumber2, pageSize2, sortInfos2) =>
                             {
-                                PageNumber = pageNumber2,
-                                PageSize = pageSize2,
-                                Outline = category.Outline
-                            };
+                                var productSearchCriteria = new ProductSearchCriteria(workContext.CurrentLanguage, workContext.CurrentCurrency)
+                                {
+                                    PageNumber = pageNumber2,
+                                    PageSize = pageSize2,
+                                    Outline = category.Outline + "*",
+                                    ResponseGroup = workContext.CurrentProductSearchCriteria.ResponseGroup
+                                };
 
-                            //criteria.CategoryId = category.Id;
-                            if (string.IsNullOrEmpty(criteria.SortBy) && !sortInfos2.IsNullOrEmpty())
-                            {
-                                categoryProductCriteria.SortBy = SortInfo.ToString(sortInfos2);
-                            }
+                                //criteria.CategoryId = category.Id;
+                                if (string.IsNullOrEmpty(criteria.SortBy) && !sortInfos2.IsNullOrEmpty())
+                                {
+                                    productSearchCriteria.SortBy = SortInfo.ToString(sortInfos2);
+                                }
 
-                            var searchResult = catalogSearchService.SearchProducts(categoryProductCriteria);
+                                var searchResult = catalogSearchService.SearchProducts(productSearchCriteria);
 
-                            //Because catalog search products returns also aggregations we can use it to populate workContext using C# closure
-                            //now workContext.Aggregation will be contains preloaded aggregations for current category
-                            workContext.Aggregations = new MutablePagedList<Aggregation>(searchResult.Aggregations);
-                            return searchResult.Products;
-                        });
-                    }
-                    return result;
-                });
+                                //Because catalog search products returns also aggregations we can use it to populate workContext using C# closure
+                                //now workContext.Aggregation will be contains preloaded aggregations for current category
+                                workContext.Aggregations = new MutablePagedList<Aggregation>(searchResult.Aggregations);
+                                return searchResult.Products;
+                            }, 1, ProductSearchCriteria.DefaultPageSize);
+                        }
+                        return result;
+                    }, 1, CategorySearchCriteria.DefaultPageSize);
 
-                //This line make delay products loading initialization (products can be evaluated on view rendering time)
-                workContext.Products = new MutablePagedList<Product>((pageNumber, pageSize, sortInfos) =>
-                {
-                    var criteria = workContext.CurrentProductSearchCriteria.Clone();
-                    criteria.PageNumber = pageNumber;
-                    criteria.PageSize = pageSize;
-                    if (string.IsNullOrEmpty(criteria.SortBy) && !sortInfos.IsNullOrEmpty())
+                    //This line make delay products loading initialization (products can be evaluated on view rendering time)
+                    workContext.Products = new MutablePagedList<Product>((pageNumber, pageSize, sortInfos) =>
                     {
-                        criteria.SortBy = SortInfo.ToString(sortInfos);
-                    }
-                    var result = catalogSearchService.SearchProducts(criteria);
-                    //Prevent double api request for get aggregations
-                    //Because catalog search products returns also aggregations we can use it to populate workContext using C# closure
-                    //now workContext.Aggregation will be contains preloaded aggregations for current search criteria
-                    workContext.Aggregations = new MutablePagedList<Aggregation>(result.Aggregations);
-                    return result.Products;
-                });
-                //This line make delay aggregation loading initialization (aggregation can be evaluated on view rendering time)
-                workContext.Aggregations = new MutablePagedList<Aggregation>((pageNumber, pageSize, sortInfos) =>
-                {
-                    var criteria = workContext.CurrentProductSearchCriteria.Clone();
-                    criteria.PageNumber = pageNumber;
-                    criteria.PageSize = pageSize;
-                    if (string.IsNullOrEmpty(criteria.SortBy) && !sortInfos.IsNullOrEmpty())
+                        var criteria = workContext.CurrentProductSearchCriteria.Clone();
+                        criteria.PageNumber = pageNumber;
+                        criteria.PageSize = pageSize;
+                        if (string.IsNullOrEmpty(criteria.SortBy) && !sortInfos.IsNullOrEmpty())
+                        {
+                            criteria.SortBy = SortInfo.ToString(sortInfos);
+                        }
+                        var result = catalogSearchService.SearchProducts(criteria);
+                        //Prevent double api request for get aggregations
+                        //Because catalog search products returns also aggregations we can use it to populate workContext using C# closure
+                        //now workContext.Aggregation will be contains preloaded aggregations for current search criteria
+                        workContext.Aggregations = new MutablePagedList<Aggregation>(result.Aggregations);
+                        return result.Products;
+                    }, 1, ProductSearchCriteria.DefaultPageSize);
+
+                    //This line make delay aggregation loading initialization (aggregation can be evaluated on view rendering time)
+                    workContext.Aggregations = new MutablePagedList<Aggregation>((pageNumber, pageSize, sortInfos) =>
                     {
-                        criteria.SortBy = SortInfo.ToString(sortInfos);
+                        var criteria = workContext.CurrentProductSearchCriteria.Clone();
+                        criteria.PageNumber = pageNumber;
+                        criteria.PageSize = pageSize;
+                        if (string.IsNullOrEmpty(criteria.SortBy) && !sortInfos.IsNullOrEmpty())
+                        {
+                            criteria.SortBy = SortInfo.ToString(sortInfos);
+                        }
+                        //Force to load products and its also populate workContext.Aggregations by preloaded values
+                        workContext.Products.Slice(pageNumber, pageSize, sortInfos);
+                        return workContext.Aggregations;
+                    }, 1, ProductSearchCriteria.DefaultPageSize);
+
+                    workContext.CurrentOrderSearchCriteria = new Model.Order.OrderSearchCriteria(qs);
+                    workContext.CurrentQuoteSearchCriteria = new Model.Quote.QuoteSearchCriteria(qs);
+
+                    //Get current customer
+                    workContext.CurrentCustomer = await GetCustomerAsync(context);
+                    //Validate that current customer has to store access
+                    ValidateUserStoreLogin(context, workContext.CurrentCustomer, workContext.CurrentStore);
+                    MaintainAnonymousCustomerCookie(context, workContext);
+
+                    // Gets the collection of external login providers
+                    var externalAuthTypes = context.Authentication.GetExternalAuthenticationTypes();
+
+                    workContext.ExternalLoginProviders = externalAuthTypes.Select(at => new LoginProvider
+                    {
+                        AuthenticationType = at.AuthenticationType,
+                        Caption = at.Caption,
+                        Properties = at.Properties
+                    }).ToList();
+
+                    workContext.ApplicationSettings = GetApplicationSettings();
+
+                    //Do not load shopping cart and other for resource requests
+                    if (!IsAssetRequest(context.Request))
+                    {
+                        await HandleNonAssetRequest(context, workContext);
                     }
-                    //Force to load products and its also populate workContext.Aggregations by preloaded values
-                    workContext.Products.Slice(pageNumber, pageSize, sortInfos);
-                    return workContext.Aggregations;
-                });
-
-                workContext.CurrentOrderSearchCriteria = new Model.Order.OrderSearchCriteria(qs);
-                workContext.CurrentQuoteSearchCriteria = new Model.Quote.QuoteSearchCriteria(qs);
-
-                //Get current customer
-                workContext.CurrentCustomer = await GetCustomerAsync(context);
-                //Validate that current customer has to store access
-                ValidateUserStoreLogin(context, workContext.CurrentCustomer, workContext.CurrentStore);
-                MaintainAnonymousCustomerCookie(context, workContext);
-
-                // Gets the collection of external login providers
-                var externalAuthTypes = context.Authentication.GetExternalAuthenticationTypes();
-
-                workContext.ExternalLoginProviders = externalAuthTypes.Select(at => new LoginProvider
-                {
-                    AuthenticationType = at.AuthenticationType,
-                    Caption = at.Caption,
-                    Properties = at.Properties
-                }).ToList();
-
-                workContext.ApplicationSettings = GetApplicationSettings();
-
-                //Do not load shopping cart and other for resource requests
-                if (!IsAssetRequest(context.Request))
-                {
-                    await HandleNonAssetRequest(context, workContext);
                 }
             }
         }
 
         protected virtual async Task HandleNonAssetRequest(IOwinContext context, WorkContext workContext)
         {
-            //Shopping cart
-            var cartBuilder = Container.Resolve<ICartBuilder>();
-            await cartBuilder.LoadOrCreateNewTransientCartAsync("default", workContext.CurrentStore, workContext.CurrentCustomer, workContext.CurrentLanguage, workContext.CurrentCurrency);
-            workContext.CurrentCart = cartBuilder.Cart;
+            await InitializeShoppingCart(context, workContext);
 
             if (workContext.CurrentStore.QuotesEnabled)
             {
@@ -273,6 +294,7 @@ namespace VirtoCommerce.Storefront.Owin
             var linkListService = Container.Resolve<IMenuLinkListService>();
             var linkLists = await CacheManager.GetAsync("GetAllStoreLinkLists-" + workContext.CurrentStore.Id, "ApiRegion", async () => await linkListService.LoadAllStoreLinkListsAsync(workContext.CurrentStore.Id));
             workContext.CurrentLinkLists = linkLists.GroupBy(x => x.Name).Select(x => x.FindWithLanguage(workContext.CurrentLanguage)).Where(x => x != null).ToList();
+
             // load all static content
             var staticContents = CacheManager.Get(string.Join(":", "AllStoreStaticContent", workContext.CurrentStore.Id), "ContentRegion", () =>
             {
@@ -302,17 +324,10 @@ namespace VirtoCommerce.Storefront.Owin
             var pricelistCacheKey = string.Join("-", "EvaluatePriceLists", workContext.CurrentStore.Id, workContext.CurrentCustomer.Id);
             workContext.CurrentPricelists = await CacheManager.GetAsync(pricelistCacheKey, "ApiRegion", async () =>
             {
-                var evalContext = new pricingModel.PriceEvaluationContext
-                {
-                    StoreId = workContext.CurrentStore.Id,
-                    CatalogId = workContext.CurrentStore.Catalog,
-                    CustomerId = workContext.CurrentCustomer.Id,
-                    Quantity = 1
-                };
-
+                var evalContext = workContext.ToPriceEvaluationContextDto();
                 var pricingModuleApi = Container.Resolve<IPricingModuleApiClient>();
                 var pricingResult = await pricingModuleApi.PricingModule.EvaluatePriceListsAsync(evalContext);
-                return pricingResult.Select(p => p.ToWebModel()).ToList();
+                return pricingResult.Select(p => p.ToPricelist(workContext.AllCurrencies, workContext.CurrentLanguage)).ToList();
             });
 
             // Vendors with their products
@@ -331,22 +346,30 @@ namespace VirtoCommerce.Storefront.Owin
                             VendorId = vendor.Id,
                             PageNumber = pageNumber2,
                             PageSize = pageSize2,
+                            ResponseGroup = workContext.CurrentProductSearchCriteria.ResponseGroup & ~ItemResponseGroup.ItemWithVendor,
                             SortBy = SortInfo.ToString(sortInfos2),
                         };
                         var searchResult = catalogSearchService.SearchProducts(criteria);
                         return searchResult.Products;
-                    });
+                    }, 1, ProductSearchCriteria.DefaultPageSize);
                 }
 
                 return vendors;
-            });
+            }, 1, VendorSearchCriteria.DefaultPageSize);
+        }
+
+        protected virtual async Task InitializeShoppingCart(IOwinContext context, WorkContext workContext)
+        {
+            var cartBuilder = Container.Resolve<ICartBuilder>();
+            await cartBuilder.LoadOrCreateNewTransientCartAsync("default", workContext.CurrentStore, workContext.CurrentCustomer, workContext.CurrentLanguage, workContext.CurrentCurrency);
+            workContext.CurrentCart = cartBuilder.Cart;
         }
 
         protected virtual async Task<Store[]> GetAllStoresAsync()
         {
             var storeApi = Container.Resolve<IStoreModuleApiClient>();
             var stores = await storeApi.StoreModule.GetStoresAsync();
-            var result = stores.Select(s => s.ToWebModel()).ToArray();
+            var result = stores.Select(s => s.ToStore()).ToArray();
             return result.Any() ? result : null;
         }
 
@@ -414,7 +437,7 @@ namespace VirtoCommerce.Storefront.Owin
 
         protected virtual void MaintainAnonymousCustomerCookie(IOwinContext context, WorkContext workContext)
         {
-            string anonymousCustomerId = context.Request.Cookies[StorefrontConstants.AnonymousCustomerIdCookie];
+            var anonymousCustomerId = context.Request.Cookies[StorefrontConstants.AnonymousCustomerIdCookie];
 
             if (workContext.CurrentCustomer.IsRegisteredUser)
             {

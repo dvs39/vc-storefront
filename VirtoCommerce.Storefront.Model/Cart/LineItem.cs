@@ -6,10 +6,11 @@ using VirtoCommerce.Storefront.Model.Cart.ValidationErrors;
 using VirtoCommerce.Storefront.Model.Catalog;
 using VirtoCommerce.Storefront.Model.Common;
 using VirtoCommerce.Storefront.Model.Marketing;
+using VirtoCommerce.Storefront.Model.Subscriptions;
 
 namespace VirtoCommerce.Storefront.Model.Cart
 {
-    public class LineItem : Entity, IDiscountable, IValidatable, ITaxable
+    public partial class LineItem : Entity, IDiscountable, IValidatable, ITaxable
     {
         public LineItem(Currency currency, Language language)
         {
@@ -164,7 +165,12 @@ namespace VirtoCommerce.Storefront.Model.Cart
         /// Gets or sets the value of line item original price
         /// </summary>
         public Money ListPrice { get; set; }
-       
+
+        /// <summary>
+        /// if the product is sold by subscription only this property contains the recurrence plan
+        /// </summary>
+        public PaymentPlan PaymentPlan { get; set; }
+
         /// <summary>
         /// Gets or sets the value of line item original price including tax 
         /// </summary>
@@ -305,14 +311,19 @@ namespace VirtoCommerce.Storefront.Model.Cart
 
         public void ApplyTaxRates(IEnumerable<TaxRate> taxRates)
         {
-             var lineItemTaxRate = taxRates.FirstOrDefault(x => x.Line.Id != null && x.Line.Id.EqualsInvariant(Id ?? ""));
+            TaxPercentRate = 0m;
+            var lineItemTaxRate = taxRates.FirstOrDefault(x => x.Line.Id != null && x.Line.Id.EqualsInvariant(Id ?? ""));
             if(lineItemTaxRate == null)
             {
                 lineItemTaxRate = taxRates.FirstOrDefault(x => x.Line.Code != null && x.Line.Code.EqualsInvariant(Sku ?? ""));
             }           
-            if (lineItemTaxRate != null && ExtendedPrice.Amount > 0 && lineItemTaxRate.Rate.Amount > 0)
+            if (lineItemTaxRate != null && lineItemTaxRate.Rate.Amount > 0)
             {
-                TaxPercentRate = lineItemTaxRate.Rate.Amount / ExtendedPrice.Amount;
+                var amount = ExtendedPrice.Amount > 0 ? ExtendedPrice.Amount : SalePrice.Amount;
+                if (amount > 0)
+                {
+                    TaxPercentRate = TaxRate.TaxPercentRound(lineItemTaxRate.Rate.Amount / amount);
+                }
             }
         }
         #endregion

@@ -16,7 +16,7 @@ namespace VirtoCommerce.Storefront.Model
     /// <summary>
     /// Main working context contains all data which could be used in presentation logic
     /// </summary>
-    public class WorkContext : IDisposable
+    public partial class WorkContext : IDisposable
     {
         public WorkContext()
         {
@@ -161,6 +161,10 @@ namespace VirtoCommerce.Storefront.Model
 
         #region Static Content Properties
         public ContentPage CurrentPage { get; set; }
+
+        public StaticContentSearchCriteria CurrentStaticSearchCriteria { get; set; }
+
+        public IMutablePagedList<ContentItem> StaticContentSearchResult { get; set; }
 
         public BlogSearchCriteria CurrentBlogSearchCritera { get; set; }
 

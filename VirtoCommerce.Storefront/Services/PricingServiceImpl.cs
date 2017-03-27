@@ -2,15 +2,14 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
-using VirtoCommerce.Storefront.AutoRestClients.CoreModuleApi;
 using VirtoCommerce.Storefront.AutoRestClients.PricingModuleApi;
 using VirtoCommerce.Storefront.Converters;
 using VirtoCommerce.Storefront.Model;
 using VirtoCommerce.Storefront.Model.Catalog;
+using VirtoCommerce.Storefront.Model.Common;
 using VirtoCommerce.Storefront.Model.Marketing.Services;
 using VirtoCommerce.Storefront.Model.Pricing.Services;
 using VirtoCommerce.Storefront.Model.Tax.Services;
-using coreModel = VirtoCommerce.Storefront.AutoRestClients.CoreModuleApi.Models;
 using pricingModel = VirtoCommerce.Storefront.AutoRestClients.PricingModuleApi.Models;
 
 namespace VirtoCommerce.Storefront.Services
@@ -20,58 +19,42 @@ namespace VirtoCommerce.Storefront.Services
         private readonly IPricingModuleApiClient _pricingApi;
         private readonly ITaxEvaluator _taxEvaluator;
         private readonly IPromotionEvaluator _promotionEvaluator;
-        private readonly Func<WorkContext> _workContextFactory;
 
-        public PricingServiceImpl(Func<WorkContext> workContextFactory, IPricingModuleApiClient pricingApi, ITaxEvaluator taxEvaluator, IPromotionEvaluator promotionEvaluator)
+        public PricingServiceImpl(
+            IPricingModuleApiClient pricingApi,
+            ITaxEvaluator taxEvaluator,
+            IPromotionEvaluator promotionEvaluator)
         {
             _pricingApi = pricingApi;
             _taxEvaluator = taxEvaluator;
-            _workContextFactory = workContextFactory;
             _promotionEvaluator = promotionEvaluator;
         }
 
         #region IPricingService Members
 
-        public async Task EvaluateProductPricesAsync(ICollection<Product> products)
+        public virtual async Task EvaluateProductPricesAsync(ICollection<Product> products, WorkContext workContext)
         {
-            var workContext = _workContextFactory();
             //Evaluate products prices
-            var evalContext = products.ToServiceModel(workContext);
+            var evalContext = workContext.ToPriceEvaluationContextDto(products);
 
             var pricesResponse = await _pricingApi.PricingModule.EvaluatePricesAsync(evalContext);
-            ApplyProductPricesInternal(products, pricesResponse);
+            ApplyProductPricesInternal(products, pricesResponse, workContext);
             //Evaluate product discounts
             var promoEvalContext = workContext.ToPromotionEvaluationContext(products);
             await _promotionEvaluator.EvaluateDiscountsAsync(promoEvalContext, products);
             //Evaluate product taxes
             var taxEvalContext = workContext.ToTaxEvaluationContext(products);
             await _taxEvaluator.EvaluateTaxesAsync(taxEvalContext, products);
-        }
-
-        public void EvaluateProductPrices(ICollection<Product> products)
-        {
-            var workContext = _workContextFactory();
-            //Evaluate products prices
-            var evalContext = products.ToServiceModel(workContext);
-
-            var pricesResponse = _pricingApi.PricingModule.EvaluatePrices(evalContext);
-            ApplyProductPricesInternal(products, pricesResponse);
-
-            //Evaluate product taxes
-            var taxEvalContext = workContext.ToTaxEvaluationContext(products);
-            _taxEvaluator.EvaluateTaxes(taxEvalContext, products);
-        }
+        }   
 
         #endregion
 
-        private void ApplyProductPricesInternal(IEnumerable<Product> products, IList<pricingModel.Price> prices)
+        protected virtual void ApplyProductPricesInternal(IEnumerable<Product> products, IList<pricingModel.Price> prices, WorkContext workContext)
         {
-            var workContext = _workContextFactory();
-
             foreach (var product in products)
             {
                 var productPrices = prices.Where(x => x.ProductId == product.Id)
-                                          .Select(x => x.ToWebModel(workContext.AllCurrencies, workContext.CurrentLanguage));
+                                          .Select(x => x.ToProductPrice(workContext.AllCurrencies, workContext.CurrentLanguage));
                 product.ApplyPrices(productPrices, workContext.CurrentCurrency, workContext.CurrentStore.Currencies);
             }
         }

@@ -27,7 +27,7 @@ namespace VirtoCommerce.Storefront.Services
             var linkLists = await _cmsApi.Menu.GetListsAsync(storeId);
             if (linkLists != null)
             {
-                retVal.AddRange(linkLists.Select(x => x.ToWebModel()));
+                retVal.AddRange(linkLists.Select(x => x.ToMenuLinkList()));
 
                 var allMenuLinks = retVal.SelectMany(x => x.MenuLinks).ToList();
                 var productLinks = allMenuLinks.OfType<ProductMenuLink>().ToList();
@@ -40,7 +40,7 @@ namespace VirtoCommerce.Storefront.Services
                 var productIds = productLinks.Select(x => x.AssociatedObjectId).ToArray();
                 if (productIds.Any())
                 {
-                    productsLoadingTask = _catalogSearchService.GetProductsAsync(productIds, ItemResponseGroup.ItemSmall | ItemResponseGroup.Seo | ItemResponseGroup.Outlines);
+                    productsLoadingTask = _catalogSearchService.GetProductsAsync(productIds, ItemResponseGroup.ItemSmall);
                 }
                 var categoriesIds = categoryLinks.Select(x => x.AssociatedObjectId).ToArray();
                 if (categoriesIds.Any())

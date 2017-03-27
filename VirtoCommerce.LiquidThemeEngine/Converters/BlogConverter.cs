@@ -1,4 +1,5 @@
 ﻿using System.Linq;
+using Microsoft.Practices.ServiceLocation;
 using Omu.ValueInjecter;
 using PagedList;
 using VirtoCommerce.LiquidThemeEngine.Objects;
@@ -10,6 +11,16 @@ namespace VirtoCommerce.LiquidThemeEngine.Converters
     public static class BlogConverter
     {
         public static Blog ToShopifyModel(this StorefrontModel.Blog blog, Storefront.Model.Language language)
+        {
+            var converter = ServiceLocator.Current.GetInstance<ShopifyModelConverter>();
+            return converter.ToLiquidBlog(blog, language);
+        }
+
+    }
+
+    public partial class ShopifyModelConverter
+    {
+        public virtual Blog ToLiquidBlog(StorefrontModel.Blog blog, Storefront.Model.Language language)
         {
             var retVal = new Blog();
 

@@ -1,6 +1,6 @@
 ﻿var storefrontApp = angular.module('storefrontApp');
 
-storefrontApp.controller('cartController', ['$rootScope', '$scope', '$timeout', 'cartService', function ($rootScope, $scope, $timeout, cartService) {
+storefrontApp.controller('cartController', ['$rootScope', '$scope', '$timeout', 'cartService', 'catalogService', function ($rootScope, $scope, $timeout, cartService, catalogService) {
     var timer;
 
     initialize();
@@ -73,6 +73,43 @@ storefrontApp.controller('cartController', ['$rootScope', '$scope', '$timeout', 
         }
     }
 
+    $scope.searchProduct = function () {
+        $scope.productSearchResult = null;
+        if ($scope.productSkuOrName) {
+            $timeout.cancel(timer);
+            timer = $timeout(function () {
+                $scope.productSearchProcessing = true;
+                var criteria = {
+                    keyword: $scope.productSkuOrName,
+                    start: 0,
+                    pageSize: 5
+                }
+                catalogService.search(criteria).then(function (response) {
+                    $scope.productSearchProcessing = false;
+                    $scope.productSearchResult = response.data.products;
+                }, function (response) {
+                    $scope.productSearchProcessing = false;
+                });
+            }, 300);
+        }
+    }
+
+    $scope.selectSearchedProduct = function (product) {
+        $scope.productSearchResult = null;
+        $scope.selectedSearchedProduct = product;
+        $scope.productSkuOrName = product.name;
+    }
+
+    $scope.addProductToCart = function (product, quantity) {
+        $scope.cartIsUpdating = true;
+        cartService.addLineItem(product.id, quantity).then(function (response) {
+            getCart();
+            $scope.productSkuOrName = null;
+            $scope.selectedSearchedProduct = null;
+            $rootScope.$broadcast('cartItemsChanged');
+        });
+    }
+
     function initialize() {
         getCart();
     }
@@ -80,7 +117,9 @@ storefrontApp.controller('cartController', ['$rootScope', '$scope', '$timeout', 
     function getCart() {
         $scope.cartIsUpdating = true;
         cartService.getCart().then(function (response) {
-            $scope.cart = response.data;
+            var cart = response.data;
+            cart.hasValidationErrors = _.some(cart.validationErrors) || _.some(cart.items, function (item) { return _.some(item.validationErrors) });
+            $scope.cart = cart;
             $scope.cartIsUpdating = false;
         }, function (response) {
             $scope.cartIsUpdating = false;

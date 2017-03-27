@@ -5,7 +5,7 @@ using VirtoCommerce.Storefront.Model.Marketing;
 
 namespace VirtoCommerce.Storefront.Model
 {
-    public class TierPrice : ValueObject<TierPrice>, ITaxable
+    public partial class TierPrice : ValueObject<TierPrice>, ITaxable
     {
         public TierPrice(Currency currency)
             :this (new Money(currency), 0)
@@ -102,7 +102,7 @@ namespace VirtoCommerce.Storefront.Model
             var shipmentTaxRate = taxRates.FirstOrDefault(x => x.Line.Quantity == Quantity);
             if (shipmentTaxRate != null && ActualPrice.Amount > 0 && shipmentTaxRate.Rate.Amount > 0)
             {
-                TaxPercentRate = shipmentTaxRate.Rate.Amount / ActualPrice.Amount;
+                TaxPercentRate = TaxRate.TaxPercentRound(shipmentTaxRate.Rate.Amount / ActualPrice.Amount);
             }
         }
         #endregion

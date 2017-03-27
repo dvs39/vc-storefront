@@ -1,4 +1,5 @@
 ﻿using System.Linq;
+using Microsoft.Practices.ServiceLocation;
 using Omu.ValueInjecter;
 using PagedList;
 using VirtoCommerce.LiquidThemeEngine.Objects;
@@ -11,10 +12,18 @@ namespace VirtoCommerce.LiquidThemeEngine.Converters
     {
         public static BlogSearch ToShopifyModel(this StorefrontModel.BlogSearchCriteria blogSearchCriteria)
         {
-            var retVal = new BlogSearch();
+            var converter = ServiceLocator.Current.GetInstance<ShopifyModelConverter>();
+            return converter.ToLiquidBlogSearch(blogSearchCriteria);
+        }
+    }
 
+    public partial class ShopifyModelConverter
+    {
+        public virtual BlogSearch ToLiquidBlogSearch(StorefrontModel.BlogSearchCriteria blogSearchCriteria)
+        {
+            var retVal = new BlogSearch();
             retVal.InjectFrom<NullableAndEnumValueInjecter>(blogSearchCriteria);
-       
+
             return retVal;
         }
     }

@@ -19,30 +19,33 @@ namespace VirtoCommerce.Storefront.Services
         }
 
         #region IPromotionEvaluator Members
-        public async Task EvaluateDiscountsAsync(PromotionEvaluationContext context, IEnumerable<IDiscountable> owners)
+
+        public virtual async Task EvaluateDiscountsAsync(PromotionEvaluationContext context, IEnumerable<IDiscountable> owners)
         {
-            var rewards = await _marketingApi.MarketingModulePromotion.EvaluatePromotionsAsync(context.ToServiceModel());
+            var contextDto = context.ToPromotionEvaluationContextDto();
+            var rewards = await _marketingApi.MarketingModulePromotion.EvaluatePromotionsAsync(contextDto);
             InnerEvaluateDiscounts(rewards, owners);
         }
 
-        public void EvaluateDiscounts(PromotionEvaluationContext context, IEnumerable<IDiscountable> owners)
+        public virtual void EvaluateDiscounts(PromotionEvaluationContext context, IEnumerable<IDiscountable> owners)
         {
-            var rewards = _marketingApi.MarketingModulePromotion.EvaluatePromotions(context.ToServiceModel());
+            var contextDto = context.ToPromotionEvaluationContextDto();
+            var rewards = _marketingApi.MarketingModulePromotion.EvaluatePromotions(contextDto);
             InnerEvaluateDiscounts(rewards, owners);
         }
 
         #endregion
 
-        private static void InnerEvaluateDiscounts(IList<marketingModel.PromotionReward> rewards, IEnumerable<IDiscountable> owners)
+        protected virtual void InnerEvaluateDiscounts(IList<marketingModel.PromotionReward> rewards, IEnumerable<IDiscountable> owners)
         {
-            if (rewards == null)
+            if (rewards != null)
             {
-                return;
-            }
+                var rewardsMap = owners.Select(x => x.Currency).Distinct().ToDictionary(x => x, x => rewards.Select(r => r.ToPromotionReward(x)).ToArray());
 
-            foreach (var owner in owners)
-            {
-                owner.ApplyRewards(rewards.Select(r => r.ToWebModel(owner.Currency)));
+                foreach (var owner in owners)
+                {
+                    owner.ApplyRewards(rewardsMap[owner.Currency]);
+                }
             }
         }
     }

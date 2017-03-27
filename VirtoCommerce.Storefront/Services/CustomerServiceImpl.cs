@@ -7,8 +7,10 @@ using VirtoCommerce.Storefront.AutoRestClients.CustomerModuleApi;
 using VirtoCommerce.Storefront.AutoRestClients.OrdersModuleApi;
 using VirtoCommerce.Storefront.AutoRestClients.QuoteModuleApi;
 using VirtoCommerce.Storefront.AutoRestClients.StoreModuleApi;
+using VirtoCommerce.Storefront.AutoRestClients.SubscriptionModuleApi;
 using VirtoCommerce.Storefront.Common;
 using VirtoCommerce.Storefront.Converters;
+using VirtoCommerce.Storefront.Converters.Subscriptions;
 using VirtoCommerce.Storefront.Model;
 using VirtoCommerce.Storefront.Model.Common;
 using VirtoCommerce.Storefront.Model.Common.Events;
@@ -18,9 +20,12 @@ using VirtoCommerce.Storefront.Model.Order;
 using VirtoCommerce.Storefront.Model.Order.Events;
 using VirtoCommerce.Storefront.Model.Quote;
 using VirtoCommerce.Storefront.Model.Quote.Events;
-using customerModel = VirtoCommerce.Storefront.AutoRestClients.CustomerModuleApi.Models;
-using orderModel = VirtoCommerce.Storefront.AutoRestClients.OrdersModuleApi.Models;
-using quoteModel = VirtoCommerce.Storefront.AutoRestClients.QuoteModuleApi.Models;
+using VirtoCommerce.Storefront.Model.Stores;
+using VirtoCommerce.Storefront.Model.Subscriptions;
+using customerDto = VirtoCommerce.Storefront.AutoRestClients.CustomerModuleApi.Models;
+using orderDto = VirtoCommerce.Storefront.AutoRestClients.OrdersModuleApi.Models;
+using quoteDto = VirtoCommerce.Storefront.AutoRestClients.QuoteModuleApi.Models;
+using subscriptionDto = VirtoCommerce.Storefront.AutoRestClients.SubscriptionModuleApi.Models;
 
 namespace VirtoCommerce.Storefront.Services
 {
@@ -31,13 +36,15 @@ namespace VirtoCommerce.Storefront.Services
         private readonly Func<WorkContext> _workContextFactory;
         private readonly IQuoteModuleApiClient _quoteApi;
         private readonly IStoreModuleApiClient _storeApi;
+        private readonly ISubscriptionModuleApiClient _subscriptionApi;
         private readonly ILocalCacheManager _cacheManager;
         private const string _customerOrdersCacheRegionFormat = "customer/{0}/orders/region";
         private const string _customerQuotesCacheRegionFormat = "customer/{0}/quotes/region";
+        private const string _customerSubscriptionCacheRegionFormat = "customer/{0}/subscriptions/region";
         private const string _customerCacheKeyFormat = "customer/{0}";
         private const string _customerCacheRegionFormat = "customer/{0}/region";
         public CustomerServiceImpl(Func<WorkContext> workContextFactory, ICustomerModuleApiClient customerApi, IOrdersModuleApiClient orderApi,
-            IQuoteModuleApiClient quoteApi, IStoreModuleApiClient storeApi, ILocalCacheManager cacheManager)
+            IQuoteModuleApiClient quoteApi, IStoreModuleApiClient storeApi, ISubscriptionModuleApiClient subscriptionApi, ILocalCacheManager cacheManager)
         {
             _workContextFactory = workContextFactory;
             _customerApi = customerApi;
@@ -45,11 +52,12 @@ namespace VirtoCommerce.Storefront.Services
             _quoteApi = quoteApi;
             _storeApi = storeApi;
             _cacheManager = cacheManager;
+            _subscriptionApi = subscriptionApi;
         }
 
         #region ICustomerService Members
 
-        public async Task<CustomerInfo> GetCustomerByIdAsync(string customerId)
+        public virtual async Task<CustomerInfo> GetCustomerByIdAsync(string customerId)
         {
             var workContext = _workContextFactory();
             var retVal = await _cacheManager.GetAsync(string.Format(_customerCacheKeyFormat, customerId), string.Format(_customerCacheRegionFormat, customerId), async () =>
@@ -59,7 +67,7 @@ namespace VirtoCommerce.Storefront.Services
                 CustomerInfo result = null;
                 if (contact != null)
                 {
-                    result = contact.ToWebModel();
+                    result = contact.ToCustomerInfo();
                 }
                 return result;
             });
@@ -72,50 +80,48 @@ namespace VirtoCommerce.Storefront.Services
                 {
                     retVal.QuoteRequests = GetCustomerQuotes(retVal);
                 }
+                retVal.Subscriptions = GetCustomerSubscriptions(retVal);
             }
 
             return retVal;
         }
 
-        public async Task CreateCustomerAsync(CustomerInfo customer)
+        public virtual async Task CreateCustomerAsync(CustomerInfo customer)
         {
-            var contact = customer.ToServiceModel();
+            var contact = customer.ToCustomerContactDto();
             await _customerApi.CustomerModule.CreateContactAsync(contact);
         }
 
-        public async Task UpdateCustomerAsync(CustomerInfo customer)
+        public virtual async Task UpdateCustomerAsync(CustomerInfo customer)
         {
-            var contact = customer.ToServiceModel();
+            var contact = customer.ToCustomerContactDto();
             await _customerApi.CustomerModule.UpdateContactAsync(contact);
             //Invalidate cache
             _cacheManager.ClearRegion(string.Format(_customerCacheRegionFormat, customer.Id));
         }
 
-        public async Task<bool> CanLoginOnBehalfAsync(string storeId, string customerId)
+        public virtual async Task<bool> CanLoginOnBehalfAsync(string storeId, string customerId)
         {
             var info = await _storeApi.StoreModule.GetLoginOnBehalfInfoAsync(storeId, customerId);
             return info.CanLoginOnBehalf == true;
         }
 
-        public async Task<Vendor> GetVendorByIdAsync(string vendorId)
+        public virtual async Task<Vendor[]> GetVendorsByIdsAsync(Store store, Language language, params string[] vendorIds)
         {
-            var workContext = _workContextFactory();
-            return (await _customerApi.CustomerModule.GetVendorByIdAsync(vendorId)).ToWebModel(workContext.CurrentLanguage, workContext.CurrentStore);
+            return (await _customerApi.CustomerModule.GetVendorsByIdsAsync(vendorIds)).Select(x => x.ToVendor(language, store)).ToArray();
         }
 
-        public Vendor GetVendorById(string vendorId)
+        public virtual Vendor[] GetVendorsByIds(Store store, Language language, params string[] vendorIds)
         {
-            var workContext = _workContextFactory();
-            var retVal = _customerApi.CustomerModule.GetVendorById(vendorId).ToWebModel(workContext.CurrentLanguage, workContext.CurrentStore);
-
+            var retVal = _customerApi.CustomerModule.GetVendorsByIds(vendorIds).Select(x => x.ToVendor(language, store)).ToArray();
             return retVal;
         }
 
-        public IPagedList<Vendor> SearchVendors(string keyword, int pageNumber, int pageSize, IEnumerable<SortInfo> sortInfos)
+        public virtual IPagedList<Vendor> SearchVendors(string keyword, int pageNumber, int pageSize, IEnumerable<SortInfo> sortInfos)
         {
             // TODO: implement indexed search for vendors
             var workContext = _workContextFactory();
-            var criteria = new customerModel.MembersSearchCriteria
+            var criteria = new customerDto.MembersSearchCriteria
             {
                 Keyword = keyword,
                 DeepSearch = true,
@@ -128,17 +134,18 @@ namespace VirtoCommerce.Storefront.Services
                 criteria.Sort = SortInfo.ToString(sortInfos);
             }
             var result = _customerApi.CustomerModule.SearchVendors(criteria);
-            return new StaticPagedList<Vendor>(result.Vendors.Select(x => x.ToWebModel(workContext.CurrentLanguage, workContext.CurrentStore)), pageNumber, pageSize, result.TotalCount.Value);
+            return new StaticPagedList<Vendor>(result.Vendors.Select(x => x.ToVendor(workContext.CurrentLanguage, workContext.CurrentStore)), pageNumber, pageSize, result.TotalCount.Value);
         }
         #endregion
 
         #region IObserver<CreateOrderEvent> Members
-        public async Task OnNextAsync(OrderPlacedEvent eventArgs)
+        public virtual async Task OnNextAsync(OrderPlacedEvent eventArgs)
         {
             if (eventArgs.Order != null)
             {
                 //Invalidate cache
                 _cacheManager.ClearRegion(string.Format(_customerOrdersCacheRegionFormat, eventArgs.Order.CustomerId));
+                _cacheManager.ClearRegion(string.Format(_customerSubscriptionCacheRegionFormat, eventArgs.Order.CustomerId));
 
                 var workContext = _workContextFactory();
                 //Add addresses to contact profile
@@ -161,7 +168,7 @@ namespace VirtoCommerce.Storefront.Services
 
         #region IAsyncObserver<QuoteRequestUpdatedEvent> Members
 
-        public Task OnNextAsync(QuoteRequestUpdatedEvent quoteRequestCreatedEvent)
+        public virtual Task OnNextAsync(QuoteRequestUpdatedEvent quoteRequestCreatedEvent)
         {
             if (quoteRequestCreatedEvent.QuoteRequest != null)
             {
@@ -174,12 +181,12 @@ namespace VirtoCommerce.Storefront.Services
 
         #endregion
 
-        private IMutablePagedList<QuoteRequest> GetCustomerQuotes(CustomerInfo customer)
+        protected virtual IMutablePagedList<QuoteRequest> GetCustomerQuotes(CustomerInfo customer)
         {
             var workContext = _workContextFactory();
             Func<int, int, IEnumerable<SortInfo>, IPagedList<QuoteRequest>> quotesGetter = (pageNumber, pageSize, sortInfos) =>
             {
-                var quoteSearchCriteria = new quoteModel.QuoteRequestSearchCriteria
+                var quoteSearchCriteria = new quoteDto.QuoteRequestSearchCriteria
                 {
                     Take = pageSize,
                     CustomerId = customer.Id,
@@ -188,17 +195,17 @@ namespace VirtoCommerce.Storefront.Services
                 };
                 var cacheKey = "GetCustomerQuotes-" + quoteSearchCriteria.GetHashCode();
                 var quoteRequestsResponse = _cacheManager.Get(cacheKey, string.Format(_customerQuotesCacheRegionFormat, customer.Id), () => _quoteApi.QuoteModule.Search(quoteSearchCriteria));
-                return new StaticPagedList<QuoteRequest>(quoteRequestsResponse.QuoteRequests.Select(x => x.ToWebModel(workContext.AllCurrencies, workContext.CurrentLanguage)),
+                return new StaticPagedList<QuoteRequest>(quoteRequestsResponse.QuoteRequests.Select(x => x.ToQuoteRequest(workContext.AllCurrencies, workContext.CurrentLanguage)),
                                                          pageNumber, pageSize, quoteRequestsResponse.TotalCount.Value);
             };
 
-            return new MutablePagedList<QuoteRequest>(quotesGetter);
+            return new MutablePagedList<QuoteRequest>(quotesGetter, 1, QuoteSearchCriteria.DefaultPageSize);
         }
 
-        private IMutablePagedList<CustomerOrder> GetCustomerOrders(CustomerInfo customer)
+        protected virtual IMutablePagedList<CustomerOrder> GetCustomerOrders(CustomerInfo customer)
         {
             var workContext = _workContextFactory();
-            var orderSearchcriteria = new orderModel.CustomerOrderSearchCriteria
+            var orderSearchcriteria = new orderDto.CustomerOrderSearchCriteria
             {
                 CustomerId = customer.Id,
                 ResponseGroup = "full"
@@ -211,10 +218,35 @@ namespace VirtoCommerce.Storefront.Services
                 orderSearchcriteria.Take = pageSize;
                 var cacheKey = "GetCustomerOrders-" + orderSearchcriteria.GetHashCode();
                 var ordersResponse = _cacheManager.Get(cacheKey, string.Format(_customerOrdersCacheRegionFormat, customer.Id), () => _orderApi.OrderModule.Search(orderSearchcriteria));
-                return new StaticPagedList<CustomerOrder>(ordersResponse.CustomerOrders.Select(x => x.ToWebModel(workContext.AllCurrencies, workContext.CurrentLanguage)), pageNumber, pageSize,
+                return new StaticPagedList<CustomerOrder>(ordersResponse.CustomerOrders.Select(x => x.ToCustomerOrder(workContext.AllCurrencies, workContext.CurrentLanguage)), pageNumber, pageSize,
                                                           ordersResponse.TotalCount.Value);
             };
-            return new MutablePagedList<CustomerOrder>(ordersGetter);
+            return new MutablePagedList<CustomerOrder>(ordersGetter, 1, OrderSearchCriteria.DefaultPageSize);
+        }
+
+        protected virtual IMutablePagedList<Subscription> GetCustomerSubscriptions(CustomerInfo customer)
+        {
+            var workContext = _workContextFactory();
+            var  subscriptionSearchcriteria = new subscriptionDto.SubscriptionSearchCriteria
+            {
+                CustomerId = customer.Id,
+                ResponseGroup = SubscriptionResponseGroup.Full.ToString()               
+            };
+
+            Func<int, int, IEnumerable<SortInfo>, IPagedList<Subscription>> subscriptionGetter = (pageNumber, pageSize, sortInfos) =>
+            {
+                subscriptionSearchcriteria.Skip = (pageNumber - 1) * pageSize;
+                subscriptionSearchcriteria.Take = pageSize;
+                var cacheKey = "GetSubscriptions-" + subscriptionSearchcriteria.GetHashCode();
+                var retVal = _cacheManager.Get(cacheKey, string.Format(_customerSubscriptionCacheRegionFormat, customer.Id), () =>
+                {
+                    var searchResult = _subscriptionApi.SubscriptionModule.SearchSubscriptions(subscriptionSearchcriteria);
+                    return new StaticPagedList<Subscription>(searchResult.Subscriptions.Select(x => x.ToSubscription(workContext.AllCurrencies, workContext.CurrentLanguage)), pageNumber, pageSize,
+                                                             searchResult.TotalCount.Value);
+                });
+               return retVal;
+            };
+            return new MutablePagedList<Subscription>(subscriptionGetter, 1, SubscriptionSearchCriteria.DefaultPageSize);
         }
     }
 }

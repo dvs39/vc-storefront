@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Linq;
 using System.Threading.Tasks;
+using System.Web;
 using System.Web.Mvc;
 using VirtoCommerce.Storefront.Common;
 using VirtoCommerce.Storefront.Model;
@@ -41,15 +42,36 @@ namespace VirtoCommerce.Storefront.Controllers
         public async Task<ActionResult> CategoryBrowsing(string categoryId, string view)
         {
             var category = (await _searchService.GetCategoriesAsync(new[] { categoryId }, CategoryResponseGroup.Full)).FirstOrDefault();
-            WorkContext.CurrentCategory = category;
-            WorkContext.CurrentProductSearchCriteria.Outline = string.Format("{0}*", category.Outline); // should we simply take it from current category?
+            if(category == null)
+            {
+                throw new HttpException(404, String.Format("Category {0} not found.", categoryId));
+            }
 
+            WorkContext.CurrentCategory = category;
+            WorkContext.CurrentPageSeo = category.SeoInfo.JsonClone();
+            WorkContext.CurrentPageSeo.Slug = category.Url;
+
+            var criteria = WorkContext.CurrentProductSearchCriteria.Clone();
+            criteria.Outline = string.Format("{0}*", category.Outline); // should we simply take it from current category?
+       
             if (category != null)
             {
-                category.Products = WorkContext.Products;
-
-                WorkContext.CurrentPageSeo = category.SeoInfo.JsonClone();
-                WorkContext.CurrentPageSeo.Slug = category.Url;
+                category.Products = new MutablePagedList<Product>((pageNumber, pageSize, sortInfos) =>
+                {                 
+                    criteria.PageNumber = pageNumber;
+                    criteria.PageSize = pageSize;
+                    if (string.IsNullOrEmpty(criteria.SortBy) && !sortInfos.IsNullOrEmpty())
+                    {
+                        criteria.SortBy = SortInfo.ToString(sortInfos);
+                    }
+                    var result = _searchService.SearchProducts(criteria);
+                    //Prevent double api request for get aggregations
+                    //Because catalog search products returns also aggregations we can use it to populate workContext using C# closure
+                    //now workContext.Aggregation will be contains preloaded aggregations for current search criteria
+                    WorkContext.Aggregations = new MutablePagedList<Aggregation>(result.Aggregations);
+                    return result.Products;
+                }, 1, ProductSearchCriteria.DefaultPageSize);
+                               
 
                 // make sure title is set
                 if(string.IsNullOrEmpty(WorkContext.CurrentPageSeo.Title))

@@ -5,7 +5,7 @@ namespace VirtoCommerce.Storefront.Model.Marketing
     /// <summary>
     /// Represents promotion reward object
     /// </summary>
-    public class PromotionReward
+    public partial class PromotionReward
     {
         /// <summary>
         /// Gets or sets promotion reward amount
@@ -91,6 +91,11 @@ namespace VirtoCommerce.Storefront.Model.Marketing
         /// Gets or sets the shipping method code for the marketing reward
         /// </summary>
         public string ShippingMethodCode { get; set; }
+
+        /// <summary>
+        /// Gets or sets the payment method code for the marketing reward
+        /// </summary>
+        public string PaymentMethodCode { get; set; }
 
         public Discount ToDiscountModel(Money amount)
         {

@@ -5,19 +5,26 @@ using VirtoCommerce.Storefront.Model.Marketing;
 
 namespace VirtoCommerce.Storefront.Model
 {
-    public class ShippingMethod :  ITaxable, IDiscountable
+    public partial class ShippingMethod : ITaxable, IDiscountable
     {
         public ShippingMethod()
         {
             Discounts = new List<Discount>();
         }
+
         public ShippingMethod(Currency currency)
             : this()
         {
             Currency = currency;
             Price = new Money(currency);
-            DiscountAmount = new Money(currency);           
+            DiscountAmount = new Money(currency);
         }
+
+        /// <summary>
+        /// Gets or sets the value of shipping method priority
+        /// </summary>
+        public int Priority { get; set; }
+
         /// <summary>
         /// Gets or sets the value of shipping method code
         /// </summary>
@@ -92,6 +99,11 @@ namespace VirtoCommerce.Storefront.Model
             }
         }
 
+        /// <summary>
+        /// Custom properties for shipping method
+        /// </summary>
+        public List<SettingEntry> Settings { get; set; }
+
         #region ITaxable Members
         /// <summary>
         /// Gets the value of total shipping method tax 
@@ -120,12 +132,24 @@ namespace VirtoCommerce.Storefront.Model
         public ICollection<TaxDetail> TaxDetails { get; set; }
 
         public void ApplyTaxRates(IEnumerable<TaxRate> taxRates)
-        {          
-            var taxRate = taxRates.FirstOrDefault(x => x.Line.Id.SplitIntoTuple('&').Item1 == ShipmentMethodCode && x.Line.Id.SplitIntoTuple('&').Item2 == OptionName);
-            if (taxRate != null && Total.Amount > 0 && taxRate.Rate.Amount > 0)
+        {
+            TaxPercentRate = 0m;
+            var taxLineId = BuildTaxLineId();
+            var taxRate = taxRates.FirstOrDefault(x => x.Line.Id == taxLineId);
+
+            if (taxRate != null && taxRate.Rate.Amount > 0)
             {
-                TaxPercentRate = taxRate.Rate.Amount / Total.Amount;            
+                var amount = Total.Amount > 0 ? Total.Amount : Price.Amount;
+                if (amount > 0)
+                {
+                    TaxPercentRate = TaxRate.TaxPercentRound(taxRate.Rate.Amount / amount);
+                }
             }
+        }
+
+        public virtual string BuildTaxLineId()
+        {
+            return string.Join("&", ShipmentMethodCode, OptionName);
         }
 
         #endregion

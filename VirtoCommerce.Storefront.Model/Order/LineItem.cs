@@ -8,7 +8,7 @@ namespace VirtoCommerce.Storefront.Model.Order
     /// <summary>
     /// Represents order line item
     /// </summary>
-    public class LineItem
+    public partial class LineItem
     {
         public LineItem(Currency currency)
         {
@@ -16,8 +16,8 @@ namespace VirtoCommerce.Storefront.Model.Order
             TaxDetails = new List<TaxDetail>();
             DynamicProperties = new List<DynamicProperty>();
 
-            Price = new Money(currency);
-            PriceWithTax = new Money(currency);
+            ListPrice = new Money(currency);
+            ListPriceWithTax = new Money(currency);
             PlacedPrice = new Money(currency);
             PlacedPriceWithTax = new Money(currency);
             ExtendedPrice = new Money(currency);
@@ -51,6 +51,11 @@ namespace VirtoCommerce.Storefront.Model.Order
         /// Gets or Sets ProductId
         /// </summary>
         public string ProductId { get; set; }
+
+        /// <summary>
+        /// Gets or Sets SKU
+        /// </summary>
+        public string Sku { get; set; }
 
         /// <summary>
         /// Gets or Sets CatalogId
@@ -183,8 +188,8 @@ namespace VirtoCommerce.Storefront.Model.Order
         public string Id { get; set; }
 
 
-        public Money Price { get; set; }
-        public Money PriceWithTax { get; set; }
+        public Money ListPrice { get; set; }
+        public Money ListPriceWithTax { get; set; }
 
         public Money PlacedPrice { get; set; }
         public Money PlacedPriceWithTax { get; set; }

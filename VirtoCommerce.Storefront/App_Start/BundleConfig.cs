@@ -1,76 +1,87 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text.RegularExpressions;
-using System.Web;
-using System.Web.Optimization;
+﻿using System.Web.Optimization;
 
 namespace VirtoCommerce.Storefront
 {
-	public class BundleConfig
-	{
-		public static void RegisterBundles(BundleCollection bundles)
-		{
-			#region JS
+    public class BundleConfig
+    {
+        public bool Minify { get; set; }
+        public IItemTransform[] CssItemTransforms { get; set; } = { new CssUrlTransform() };
 
-			bundles.Add(
-				new ScriptBundle("~/default-theme/scripts")
-					.Include("~/App_Data/Themes/default/assets/modernizr.min.js")
-					.Include("~/App_Data/Themes/default/assets/ideal-image-slider.min.js")
-					.Include("~/App_Data/Themes/default/assets/ideal-image-slider-bullet-nav.js")
-					.Include("~/App_Data/Themes/default/assets/ideal-image-slider-captions.js")
-					.IncludeDirectory("~/App_Data/Themes/default/assets/js/", "*.js"));
+        public virtual void RegisterBundles(BundleCollection bundles)
+        {
+            #region JS
 
-			bundles.Add(
-				new ScriptBundle("~/default-theme/checkout/scripts")
-					.Include("~/App_Data/Themes/default/assets/js/app.js")
-					.Include("~/App_Data/Themes/default/assets/js/services.js")
-					.Include("~/App_Data/Themes/default/assets/js/directives.js")
-					.Include("~/App_Data/Themes/default/assets/js/main.js")
-					.IncludeDirectory("~/App_Data/Themes/default/assets/js/checkout/", "*.js"));
+            bundles.Add(
+                CreateScriptBundle("~/default-theme/scripts")
+                    .Include("~/App_Data/Themes/default/assets/modernizr.min.js")
+                    .Include("~/App_Data/Themes/default/assets/ideal-image-slider.min.js")
+                    .Include("~/App_Data/Themes/default/assets/ideal-image-slider-bullet-nav.js")
+                    .Include("~/App_Data/Themes/default/assets/ideal-image-slider-captions.js")
+                    .IncludeDirectory("~/App_Data/Themes/default/assets/js/", "*.js"));
 
-			#endregion
+            bundles.Add(
+                CreateScriptBundle("~/default-theme/checkout/scripts")
+                    .Include("~/App_Data/Themes/default/assets/js/app.js")
+                    .Include("~/App_Data/Themes/default/assets/js/services.js")
+                    .Include("~/App_Data/Themes/default/assets/js/directives.js")
+                    .Include("~/App_Data/Themes/default/assets/js/main.js")
+                    .IncludeDirectory("~/App_Data/Themes/default/assets/js/common-components/", "*.js")
+                    .IncludeDirectory("~/App_Data/Themes/default/assets/js/checkout/", "*.js"));
 
-			#region CSS
+            bundles.Add(
+                new ScriptBundle("~/default-theme/account/scripts")
+                    .Include("~/App_Data/Themes/default/assets/modernizr.min.js")
+                    .Include("~/App_Data/Themes/default/assets/js/app.js")
+                    .Include("~/App_Data/Themes/default/assets/js/services.js")
+                    .Include("~/App_Data/Themes/default/assets/js/main.js")
+                    .Include("~/App_Data/Themes/default/assets/js/cart.js")
+                    .Include("~/App_Data/Themes/default/assets/js/quote-request.js")
+                    .Include("~/App_Data/Themes/default/assets/js/product-compare.js")
+                    .IncludeDirectory("~/App_Data/Themes/default/assets/js/common-components/", "*.js")
+                    .IncludeDirectory("~/App_Data/Themes/default/assets/js/account/", "*.js"));
 
-			bundles.Add(
-				new StyleBundle("~/default-theme/css")
-				.Include("~/App_Data/Themes/default/assets/storefront.css", new CustomCssRewriteUrlTransform())
-				.Include("~/App_Data/Themes/default/assets/ideal-image-slider.css", new CustomCssRewriteUrlTransform())
-				.Include("~/App_Data/Themes/default/assets/ideal-image-slider-default-theme.css", new CustomCssRewriteUrlTransform()));
+            #endregion
 
-			#endregion
-		}
+            #region CSS
 
-		private class CustomCssRewriteUrlTransform : IItemTransform
-		{
-			public string Process(string includedVirtualPath, string input)
-			{
-				return ConvertUrlsToAbsolute("~/themes/assets/", input);
-			}
+            bundles.Add(
+                CreateStyleBundle("~/default-theme/css")
+                    .Include("~/App_Data/Themes/default/assets/storefront.css", CssItemTransforms)
+                    .Include("~/App_Data/Themes/default/assets/common-components.css", CssItemTransforms)
+                    .Include("~/App_Data/Themes/default/assets/ideal-image-slider.css", CssItemTransforms)
+                    .Include("~/App_Data/Themes/default/assets/ideal-image-slider-default-theme.css", CssItemTransforms));
 
-			private static string ConvertUrlsToAbsolute(string baseUrl, string content)
-			{
-				if (string.IsNullOrWhiteSpace(content))
-				{
-					return content;
-				}
+            bundles.Add(
+                new StyleBundle("~/default-theme/account/css")
+                .Include("~/App_Data/Themes/default/assets/account-bootstrap.css", CssItemTransforms)
+                .Include("~/App_Data/Themes/default/assets/common-components.css", CssItemTransforms));
 
-				// Replace all URLs with absolute URLs
-				var url = new Regex(@"url\((['""]?)((?:(?!data:image).)+?)\1?\)");
-				return url.Replace(content, match => "url(" + RebaseUrlToAbsolute(baseUrl, match.Groups["url"].Value) + ")");
-			}
+            #endregion
+        }
 
-			private static string RebaseUrlToAbsolute(string baseUrl, string url)
-			{
-				// Don't modify absolute URLs
-				if (string.IsNullOrWhiteSpace(url) || url.StartsWith("/", StringComparison.OrdinalIgnoreCase))
-				{
-					return url;
-				}
 
-				return VirtualPathUtility.ToAbsolute(baseUrl + url);
-			}
-		}
-	}
+        protected virtual ScriptBundle CreateScriptBundle(string virtualPath)
+        {
+            var bundle = new ScriptBundle(virtualPath);
+
+            if (!Minify)
+            {
+                bundle.Transforms.Clear();
+            }
+
+            return bundle;
+        }
+
+        protected virtual StyleBundle CreateStyleBundle(string virtualPath)
+        {
+            var bundle = new StyleBundle(virtualPath);
+
+            if (!Minify)
+            {
+                bundle.Transforms.Clear();
+            }
+
+            return bundle;
+        }
+    }
 }

@@ -3,7 +3,7 @@ using VirtoCommerce.Storefront.Model.Common;
 
 namespace VirtoCommerce.Storefront.Model.Catalog
 {
-    public class Category : Entity, IHasProperties
+    public partial class Category : Entity, IHasProperties
     {
         public Category()
         {
@@ -34,10 +34,16 @@ namespace VirtoCommerce.Storefront.Model.Catalog
 
         public IMutablePagedList<Product> Products { get; set; }
 
+        /// <summary>
+        /// Child categories
+        /// </summary>
+        public IMutablePagedList<Category> Categories { get; set; }
+
         #region IHasProperties Members
         public ICollection<CatalogProperty> Properties { get; set; }
         #endregion
 
+        public string SeoPath { get; set; }
         public string Url { get; set; }
     }
 }

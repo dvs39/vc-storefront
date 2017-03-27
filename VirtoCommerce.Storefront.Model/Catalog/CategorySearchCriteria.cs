@@ -1,15 +1,22 @@
 ﻿using System.Collections.Generic;
 using System.Collections.Specialized;
-using System.Linq;
 using VirtoCommerce.Storefront.Model.Common;
 
 namespace VirtoCommerce.Storefront.Model.Catalog
 {
-    public class CategorySearchCriteria : PagedSearchCriteria
+    public partial class CategorySearchCriteria : PagedSearchCriteria
     {
+        private static int _defaultPageSize = 20;
+
+        public static int DefaultPageSize
+        {
+            get { return _defaultPageSize; }
+            set { _defaultPageSize = value; }
+        }
+
         //For JSON deserialization 
         public CategorySearchCriteria()
-            : base(new NameValueCollection())
+            : this(null)
         {
         }
 
@@ -17,13 +24,16 @@ namespace VirtoCommerce.Storefront.Model.Catalog
             : this(language, new NameValueCollection())
         {
         }
+
         public CategorySearchCriteria(Language language, NameValueCollection queryString)
-            : base(queryString)
+            : base(queryString, DefaultPageSize)
         {
             Language = language;
-
             Parse(queryString);
+            Outline = "*";
         }
+
+        public CategoryResponseGroup ResponseGroup { get; set; }
 
         public string Outline { get; set; }
 
@@ -36,11 +46,12 @@ namespace VirtoCommerce.Storefront.Model.Catalog
         public CategorySearchCriteria Clone()
         {
             var retVal = new CategorySearchCriteria(Language);
-            retVal.Language = Language;
+            retVal.Outline = Outline;
             retVal.Keyword = Keyword;
             retVal.SortBy = SortBy;
             retVal.PageNumber = PageNumber;
             retVal.PageSize = PageSize;
+            retVal.ResponseGroup = ResponseGroup;
             return retVal;
         }
 
@@ -48,6 +59,7 @@ namespace VirtoCommerce.Storefront.Model.Catalog
         {
             Keyword = queryString.Get("q");
             SortBy = queryString.Get("sort_by");
+            ResponseGroup = EnumUtility.SafeParse<CategoryResponseGroup>(queryString.Get("resp_group"), CategoryResponseGroup.Small);
         }
 
 
