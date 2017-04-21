@@ -84,6 +84,11 @@ namespace VirtoCommerce.LiquidThemeEngine.Filters
 
             if (!string.IsNullOrEmpty(retVal))
             {
+                if (!string.IsNullOrEmpty(type))
+                {
+                    retVal = retVal.AddSuffixToFileUrl(string.Format("_{0}", type));
+                }
+
                 retVal = retVal.RemoveLeadingUriScheme();
             }
 
@@ -287,7 +292,7 @@ namespace VirtoCommerce.LiquidThemeEngine.Filters
             return retVal;
         }
 
-        public static string ProductImgUrl(object input, string type)
+        public static string ProductImgUrl(object input, string type = null)
         {
             return ImgUrl(input, type);
         }
